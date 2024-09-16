@@ -1,0 +1,96 @@
+---
+#---------------------------------#
+#      general configuration      #
+#---------------------------------#
+
+version: 2.37.0-{build}
+
+branches:
+  only:
+    - main
+
+image: Visual Studio 2022
+
+environment:
+  CONDA: c:\Miniconda37-x64
+  INSTALL_DIR: c:\ECMWF
+
+  SOURCE_DIRECTORY: eccodes-2.37.0-Source
+  SOURCE_TAR: https://confluence.ecmwf.int/download/attachments/45757960/eccodes-2.37.0-Source.tar.gz?api=v2
+
+# scripts that are called at very beginning, before repo cloning
+init:
+  # make sure git clones symlinks as symlinks
+  - cmd: git config --global core.symlinks true
+    # activate conda environment so the tests can find linux utils
+  - cmd: call %CONDA%\Scripts\activate.bat
+    # auto-yes for conda
+  - cmd: conda config --set always_yes yes
+
+clone_depth: 1
+
+# scripts that run after cloning repository
+install:
+  - cmd: curl -o sources.tar.gz %SOURCE_TAR%
+  - cmd: 7z x -tgzip -so sources.tar.gz | 7z x -si -ttar
+    # install linux utils
+  - cmd: conda install -c msys2 m2-bash ^
+                                m2-findutils ^
+                                m2-coreutils ^
+                                m2-grep ^
+                                m2-sed ^
+                                m2-gawk ^
+                                m2-diffutils ^
+                                m2-perl ^
+                                m2w64-ntldd-git
+
+    # get deps. Drop libnetcdf
+  - cmd: conda install -c conda-forge cmake
+    # other deps
+  - cmd: conda install libpng openjpeg libaec
+
+#---------------------------------#
+#       build configuration       #
+#---------------------------------#
+
+platform:
+  - x64
+
+before_build:
+  - cmd: call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x86_amd64
+
+build_script:
+  - cmd: cd %SOURCE_DIRECTORY%
+  - cmd: mkdir build && cd build
+  - cmd: cmake -G "NMake Makefiles" ^
+      -D CMAKE_INSTALL_PREFIX=%INSTALL_DIR% ^
+      -D CMAKE_BUILD_TYPE=Release ^
+      -D ENABLE_FORTRAN=0 ^
+      -D ENABLE_PYTHON=0 ^
+      -D ENABLE_NETCDF=0 ^
+      -D ENABLE_PNG=1 ^
+      -D ENABLE_JPG=1 ^
+      -D ENABLE_JPG_LIBOPENJPEG=1 ^
+      -D ENABLE_AEC=1 ^
+      -D IEEE_LE=1 ^
+      -D ENABLE_EXAMPLES=0 ^
+      -D ENABLE_MEMFS=1 ^
+      -D ENABLE_TESTS=0 ^
+      -D ENABLE_EXTRA_TESTS=OFF ^
+      ..
+
+  - cmd: nmake install
+  - cmd: copy "%CONDA%\Library\bin\openjp2.dll" "%INSTALL_DIR%\bin\"
+  - cmd: copy "%CONDA%\Library\bin\libpng16.dll" "%INSTALL_DIR%\bin\"
+  - cmd: copy "%CONDA%\Library\bin\zlib.dll" "%INSTALL_DIR%\bin\"
+  - cmd: copy "%CONDA%\Library\bin\aec.dll" "%INSTALL_DIR%\bin\"
+
+test_script:
+  - cmd: call "%INSTALL_DIR%\bin\codes_info.exe"
+
+after_test:
+  - cmd: cd c:\
+  - cmd: 7z a "%APPVEYOR_BUILD_FOLDER%\eccodes-win-x64.zip" "%INSTALL_DIR%"
+
+artifacts:
+  - path: eccodes-win-x64.zip
